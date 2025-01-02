@@ -9,20 +9,18 @@ from functools import partial
 
 def process_chunk(chunk_info, input_path, output_dir):
     start, end = chunk_info
-    chunk_pdf = os.path.join(output_dir, f'temp_chunk_{start}_{end}.pdf')
+    # Include input filename in temp filename
+    base_name = os.path.splitext(os.path.basename(input_path))[0]
+    chunk_pdf = os.path.join(output_dir, f'temp_{base_name}_chunk_{start}_{end}.pdf')
     
     # Process chunk
     doc = fitz.open(input_path)
     out_doc = fitz.open()
     
-    # Progress bar for pages within this chunk
-    pbar = tqdm(range(start, end), 
-                desc=f"Pages {start}-{end}",
-                unit="page",
-                leave=False,
-                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} pages")
+    # Simple progress print instead of tqdm for subprocess
+    print(f"Processing {base_name} pages {start}-{end}")
     
-    for page_num in pbar:
+    for page_num in range(start, end):
         page = doc[page_num]
         zoom = 3
         mat = fitz.Matrix(zoom, zoom)
@@ -40,23 +38,36 @@ def process_chunk(chunk_info, input_path, output_dir):
     out_doc.save(chunk_pdf, garbage=4, deflate=True)
     doc.close()
     out_doc.close()
+    print(f"Completed {base_name} pages {start}-{end}")
     return chunk_pdf
 
-def process_in_chunks(input_path, output_path=None, chunk_size=50):
+def process_in_chunks(input_path, output_path=None, chunk_size=20):
     if output_path is None:
         output_path = input_path.rsplit('.', 1)[0] + '_inverted.pdf'
     
-    output_dir = os.path.dirname(os.path.abspath(input_path))
+    # Create temp directory inside current directory
+    base_name = os.path.splitext(os.path.basename(input_path))[0]
+    temp_dir = os.path.join(os.path.dirname(os.path.abspath(input_path)), f'temp_{base_name}')
+    os.makedirs(temp_dir, exist_ok=True)
     
     try:
         doc = fitz.open(input_path)
         total_pages = doc.page_count
         doc.close()
 
+        # Calculate optimal chunk size based on total pages
+        if total_pages > 1000:
+            chunk_size = 10  # Even smaller chunks for very large PDFs
+        elif total_pages > 500:
+            chunk_size = 15  # Medium chunks for large PDFs
+        else:
+            chunk_size = 20  # Default for regular PDFs
+
         print(f"\nInverting colors in {input_path}")
         print(f"Total pages: {total_pages}")
         print(f"Processing in chunks of {chunk_size} pages using 4 cores")
-        print("Progress:")
+        print(f"Temporary files stored in: {temp_dir}")
+        print("\nProgress:")
         
         # Prepare chunks
         chunks = [(i, min(i + chunk_size, total_pages)) 
@@ -64,35 +75,27 @@ def process_in_chunks(input_path, output_path=None, chunk_size=50):
         
         # Process chunks in parallel using exactly 4 cores
         with Pool(4) as pool:
-            process_func = partial(process_chunk, input_path=input_path, output_dir=output_dir)
-            chunk_bar = tqdm(total=len(chunks), 
-                           desc="Chunks", 
-                           unit="chunk",
-                           position=0,
-                           bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} chunks [{elapsed}<{remaining}]")
-            
+            process_func = partial(process_chunk, input_path=input_path, output_dir=temp_dir)
             chunks_processed = []
-            for result in pool.imap(process_func, chunks):
-                chunks_processed.append(result)
-                chunk_bar.update(1)
-            chunk_bar.close()
+            
+            # Main progress bar for chunks
+            with tqdm(total=len(chunks), desc=f"Overall progress ({base_name})", unit="chunk") as pbar:
+                for result in pool.imap(process_func, chunks):
+                    chunks_processed.append(result)
+                    pbar.update(1)
         
         # Merge all chunks
-        print("\nMerging processed chunks...")
+        print(f"\nMerging processed chunks for {base_name}...")
         result_doc = fitz.open()
         chunk_files = sorted(chunks_processed)
         
-        merge_bar = tqdm(total=len(chunk_files), 
-                        desc="Merging files",
-                        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} files [{elapsed}<{remaining}]")
-        
-        for chunk_file in chunk_files:
-            chunk_doc = fitz.open(chunk_file)
-            result_doc.insert_pdf(chunk_doc)
-            chunk_doc.close()
-            os.remove(chunk_file)
-            merge_bar.update(1)
-        merge_bar.close()
+        with tqdm(total=len(chunk_files), desc=f"Merging {base_name}") as pbar:
+            for chunk_file in chunk_files:
+                chunk_doc = fitz.open(chunk_file)
+                result_doc.insert_pdf(chunk_doc)
+                chunk_doc.close()
+                os.remove(chunk_file)
+                pbar.update(1)
         
         print(f"\nSaving final PDF to {output_path}")
         result_doc.save(output_path, garbage=4, deflate=True)
@@ -100,15 +103,20 @@ def process_in_chunks(input_path, output_path=None, chunk_size=50):
         print("Done!")
         
     except Exception as e:
-        print(f"Error: {e}")
-        # Clean up any remaining temporary files
-        for f in os.listdir(output_dir):
-            if f.startswith('temp_chunk_'):
-                try:
-                    os.remove(os.path.join(output_dir, f))
-                except:
-                    pass
+        print(f"Error processing {base_name}: {e}")
         raise e
+    finally:
+        # Clean up temp directory
+        try:
+            if os.path.exists(temp_dir):
+                for f in os.listdir(temp_dir):
+                    try:
+                        os.remove(os.path.join(temp_dir, f))
+                    except:
+                        pass
+                os.rmdir(temp_dir)
+        except:
+            print(f"Warning: Could not clean up temp directory: {temp_dir}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
