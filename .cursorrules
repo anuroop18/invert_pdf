@@ -1,0 +1,15 @@
+- For commit messages, keep them super short and concise, just a couple sentences max.
+- Use uv for project management instead of pip
+    Basic `uv` Commands:
+        - `uv run`: Execute a command/script.
+        - `uv init`: Initialize a project.
+        - `uv add/remove`: Manage dependencies.
+        - `uv sync/lock`: Update environment/lockfile.
+        - `uv export`: Export lockfile.
+        - `uv tree`: Show dependency tree.
+        - `uv tool`: Run package tools.
+        - `uv python/pip`: Manage Python/packages.
+        - `uv venv`: Create virtual environment.
+        - `uv build/publish`: Build/publish packages.
+        - `uv cache`: Manage cache.
+        - `uv self/version/help`: Manage uv/version/help.
