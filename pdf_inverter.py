@@ -4,7 +4,7 @@ from PIL import Image
 import io
 from tqdm import tqdm
 import os
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 from functools import partial
 
 def process_chunk(chunk_info, input_path, output_dir):
@@ -65,7 +65,7 @@ def process_in_chunks(input_path, output_path=None, chunk_size=20):
 
         print(f"\nInverting colors in {input_path}")
         print(f"Total pages: {total_pages}")
-        print(f"Processing in chunks of {chunk_size} pages using 4 cores")
+        print(f"Processing in chunks of {chunk_size} pages using {cpu_count()-2} cores")
         print(f"Temporary files stored in: {temp_dir}")
         print("\nProgress:")
         
@@ -73,8 +73,12 @@ def process_in_chunks(input_path, output_path=None, chunk_size=20):
         chunks = [(i, min(i + chunk_size, total_pages)) 
                  for i in range(0, total_pages, chunk_size)]
         
-        # Process chunks in parallel using exactly 4 cores
-        with Pool(4) as pool:
+        # Get number of available cores
+        num_cores = cpu_count()-2
+        print(f"Processing in chunks of {chunk_size} pages using {num_cores} cores")
+        
+        # Process chunks in parallel using all available cores
+        with Pool(num_cores) as pool:
             process_func = partial(process_chunk, input_path=input_path, output_dir=temp_dir)
             chunks_processed = []
             
